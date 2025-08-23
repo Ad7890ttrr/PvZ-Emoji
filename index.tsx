@@ -283,7 +283,7 @@ const gameReducer = (state: GameState, action: GameAction): GameState => {
     }
     case 'CONFIRM_PLANT_SELECTION': {
       const isBrutal = state.challenge?.type === 'BRUTAL';
-      const prepTime = isBrutal ? 90000 : PREPARATION_TIME; // 90 seconds for Brutal
+      const prepTime = isBrutal ? 180000 : PREPARATION_TIME; // 180 seconds (3 minutes) for Brutal
 
       return {
         ...state,
