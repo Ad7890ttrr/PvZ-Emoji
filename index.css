@@ -1,4 +1,5 @@
 
+
 /* Basic Reset & Theming */
 :root {
   --lawn-green-dark: #3a8f48;
@@ -300,6 +301,18 @@ body {
     z-index: 5;
 }
 
+.plant.buffed {
+  animation-name: plant-bob, buff-glow;
+  animation-duration: 2s, 1.5s;
+  animation-iteration-count: infinite, infinite;
+  animation-timing-function: ease-in-out, ease-in-out;
+}
+
+@keyframes buff-glow {
+    0%, 100% { text-shadow: 0 0 8px gold; }
+    50% { text-shadow: 0 0 16px gold, 0 0 20px #ffd700; }
+}
+
 @keyframes sleep-zz-float {
     0%, 100% { transform: translateY(0px) scale(1); opacity: 1; }
     50% { transform: translateY(-10px) scale(1.1); opacity: 0.8; }
@@ -357,6 +370,11 @@ body {
 
 .zombie.magic {
   font-size: 60px;
+}
+
+.zombie.bus {
+  font-size: 70px;
+  filter: drop-shadow(3px 3px 4px rgba(0,0,0,0.6));
 }
 
 .pea {

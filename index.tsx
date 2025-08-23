@@ -20,12 +20,14 @@ const CUCUMBER_COST = 75;
 const EGGPLANT_COST = 100;
 const STRAWBERRY_COST = 75;
 const WEED_COST = 25;
+const ROSETTE_COST = 300;
 const SUN_VALUE = 25;
 const MAX_SUNS = 500;
 const NORMAL_ZOMBIE_HEALTH = 3;
 const FAST_ZOMBIE_HEALTH = 3; // Less health for balance
 const ARMOR_ZOMBIE_HEALTH = 10;
 const MAGIC_ZOMBIE_HEALTH = 5;
+const BUS_ZOMBIE_HEALTH = 5;
 const EGGPLANT_DAMAGE = 15;
 const STRAWBERRY_DAMAGE = 15;
 
@@ -34,6 +36,7 @@ const PREPARATION_TIME = 60000; // 60 seconds
 const PLANT_FIRE_RATE = 2000;
 const CUCUMBER_ATTACK_RATE = 1000;
 const MAGIC_BALL_FIRE_RATE = 5000;
+const BUS_SPAWN_RATE = 3000;
 const NATURAL_SUN_SPAWN_RATE = 8000;
 const SUNFLOWER_PRODUCE_RATE = 15000;
 const POTATOMINE_ARM_TIME = 7500;
@@ -51,12 +54,14 @@ const CUCUMBER_COOLDOWN = 20000;
 const EGGPLANT_COOLDOWN = 17500;
 const STRAWBERRY_COOLDOWN = 30000;
 const WEED_COOLDOWN = 10000;
+const ROSETTE_COOLDOWN = 35000;
 
 // Physics & Hitboxes
 const NORMAL_ZOMBIE_SPEED = 0.5; // Pixels per tick
 const FAST_ZOMBIE_SPEED = 1.0; // Pixels per tick
 const ARMOR_ZOMBIE_SPEED = 0.25; // Pixels per tick
 const MAGIC_ZOMBIE_SPEED = 0.6; // Pixels per tick
+const BUS_ZOMBIE_SPEED = 0.75; // Pixels per tick
 const PEA_SPEED = 4; // Pixels per tick
 const EGGPLANT_SPEED = 3; // Pixels per tick
 const MAGIC_BALL_SPEED = 4; // Pixels per tick
@@ -65,8 +70,8 @@ const ZOMBIE_HIT_WIDTH = 40;
 const PEA_HIT_WIDTH = 10;
 
 // --- TYPES ---
-type PlantType = 'PEASHOOTER' | 'SUNFLOWER' | 'POTATOMINE' | 'CHERRYBOMB' | 'REPEATER' | 'CUCUMBER' | 'EGGPLANT' | 'STRAWBERRY' | 'WEED';
-type ZombieType = 'NORMAL' | 'FAST' | 'ARMOR' | 'MAGIC';
+type PlantType = 'PEASHOOTER' | 'SUNFLOWER' | 'POTATOMINE' | 'CHERRYBOMB' | 'REPEATER' | 'CUCUMBER' | 'EGGPLANT' | 'STRAWBERRY' | 'WEED' | 'ROSETTE';
+type ZombieType = 'NORMAL' | 'FAST' | 'ARMOR' | 'MAGIC' | 'BUS';
 interface Plant {
   id: number;
   row: number;
@@ -78,15 +83,16 @@ interface Plant {
   attackAnimationTimer?: number;
   isSleeping?: boolean;
   sleepTimer?: number;
+  isBuffed?: boolean;
 }
 interface RunnerPlant { id: number; row: number; x: number; type: 'EGGPLANT'; }
-interface Zombie { id: number; row: number; x: number; health: number; type: ZombieType; attackCooldown?: number; isSlowed?: boolean; }
+interface Zombie { id: number; row: number; x: number; health: number; type: ZombieType; attackCooldown?: number; isSlowed?: boolean; spawnCooldown?: number; }
 interface Projectile { id: number; row: number; x: number; }
 interface MagicBall { id: number; row: number; x: number; }
 interface Sun { id: number; x: number; y: number; isFalling: boolean; targetY: number; }
 interface Explosion { id: number; row: number; col: number; ttl: number; isLarge: boolean; }
 interface HitSplat { id: number; row: number; x: number; ttl: number; }
-type Challenge = { type: 'NO_SUNFLOWER' | 'BOOM' | 'BRUTAL'; waves: number; } | null;
+type Challenge = { type: 'NO_SUNFLOWER' | 'BOOM' | 'BRUTAL' | 'BUS'; waves: number; } | null;
 type GameStatus = 'MENU' | 'PLANT_SELECTION' | 'CHALLENGE_SELECTION' | 'PLAYING' | 'PAUSED' | 'GAME_OVER' | 'VICTORY';
 
 interface GameState {
@@ -127,7 +133,6 @@ type GameAction =
   | { type: 'PLACE_PLANT'; payload: { row: number; col: number } }
   | { type: 'START_WAVE' }
   | { type: 'SPAWN_ZOMBIE' }
-  | { type: 'PLANTS_FIRE' }
   | { type: 'SPAWN_NATURAL_SUN' }
   | { type: 'SUNFLOWERS_PRODUCE_SUN' }
   | { type: 'PAUSE_GAME' }
@@ -145,6 +150,7 @@ const plantData: { [key in PlantType]: { cost: number; cooldown: number } } = {
   EGGPLANT: { cost: EGGPLANT_COST, cooldown: EGGPLANT_COOLDOWN },
   STRAWBERRY: { cost: STRAWBERRY_COST, cooldown: STRAWBERRY_COOLDOWN },
   WEED: { cost: WEED_COST, cooldown: WEED_COOLDOWN },
+  ROSETTE: { cost: ROSETTE_COST, cooldown: ROSETTE_COOLDOWN },
 };
 
 // --- ZOMBIE DATA ---
@@ -153,6 +159,7 @@ const zombieData: { [key in ZombieType]: { health: number; speed: number; } } = 
   FAST: { health: FAST_ZOMBIE_HEALTH, speed: FAST_ZOMBIE_SPEED },
   ARMOR: { health: ARMOR_ZOMBIE_HEALTH, speed: ARMOR_ZOMBIE_SPEED },
   MAGIC: { health: MAGIC_ZOMBIE_HEALTH, speed: MAGIC_ZOMBIE_SPEED },
+  BUS: { health: BUS_ZOMBIE_HEALTH, speed: BUS_ZOMBIE_SPEED },
 };
 
 // Wave Configuration
@@ -206,6 +213,19 @@ const generateBrutalWaves = (count: number) => {
     return waves;
 };
 
+const generateBusWaves = (count: number) => {
+    const waves = [];
+    for (let i = 0; i < count; i++) {
+        const busCount = 1 + Math.floor(i / 2);
+        const spawnRate = Math.max(4000, 10000 - (i * 250));
+        waves.push({
+            bus: busCount,
+            spawnRate,
+        });
+    }
+    return waves;
+};
+
 // --- INITIAL STATE ---
 const initialState: GameState = {
   gameStatus: 'MENU',
@@ -229,6 +249,7 @@ const initialState: GameState = {
     EGGPLANT: 0,
     STRAWBERRY: 0,
     WEED: 0,
+    ROSETTE: 0,
   },
   nextIds: { plant: 0, zombie: 0, projectile: 0, sun: 0, explosion: 0, hitSplat: 0, magicBall: 0, runnerPlant: 0 },
   preparationTimeLeft: 0,
@@ -271,6 +292,8 @@ const gameReducer = (state: GameState, action: GameAction): GameState => {
       let challengeWaves = [];
       if (action.payload.type === 'BRUTAL') {
           challengeWaves = generateBrutalWaves(action.payload.waves);
+      } else if (action.payload.type === 'BUS') {
+          challengeWaves = generateBusWaves(action.payload.waves);
       } else {
           challengeWaves = generateNormalWaves(action.payload.waves);
       }
@@ -298,6 +321,8 @@ const gameReducer = (state: GameState, action: GameAction): GameState => {
       if (state.challenge) {
           if (state.challenge.type === 'BRUTAL') {
               restartWaves = generateBrutalWaves(state.challenge.waves);
+          } else if (state.challenge.type === 'BUS') {
+              restartWaves = generateBusWaves(state.challenge.waves);
           } else {
               restartWaves = generateNormalWaves(state.challenge.waves);
           }
@@ -402,6 +427,7 @@ const gameReducer = (state: GameState, action: GameAction): GameState => {
         col,
         type: state.selectedPlant,
         ...(state.selectedPlant === 'POTATOMINE' && { armTime: POTATOMINE_ARM_TIME }),
+        ...((state.selectedPlant === 'PEASHOOTER' || state.selectedPlant === 'REPEATER') && { attackCooldown: 250 }),
         ...(state.selectedPlant === 'CUCUMBER' && { attackCooldown: 0, isAttacking: false, attackAnimationTimer: 0 }),
         ...(state.selectedPlant === 'STRAWBERRY' && { isSleeping: false, sleepTimer: 0 }),
       };
@@ -424,10 +450,11 @@ const gameReducer = (state: GameState, action: GameAction): GameState => {
         if (!waveConfig) return state;
 
         const spawnList: ZombieType[] = [];
-        for (let i = 0; i < waveConfig.normal; i++) spawnList.push('NORMAL');
+        for (let i = 0; i < (waveConfig.normal || 0); i++) spawnList.push('NORMAL');
         for (let i = 0; i < (waveConfig.fast || 0); i++) spawnList.push('FAST');
         for (let i = 0; i < (waveConfig.armor || 0); i++) spawnList.push('ARMOR');
         for (let i = 0; i < (waveConfig.magic || 0); i++) spawnList.push('MAGIC');
+        for (let i = 0; i < (waveConfig.bus || 0); i++) spawnList.push('BUS');
         
         // Shuffle the list for random spawn order
         for (let i = spawnList.length - 1; i > 0; i--) {
@@ -487,6 +514,9 @@ const gameReducer = (state: GameState, action: GameAction): GameState => {
           if (zombieType === 'MAGIC') {
               newZombie.attackCooldown = MAGIC_BALL_FIRE_RATE;
           }
+          if (zombieType === 'BUS') {
+              newZombie.spawnCooldown = BUS_SPAWN_RATE;
+          }
           newZombies.push(newZombie);
         }
   
@@ -538,37 +568,23 @@ const gameReducer = (state: GameState, action: GameAction): GameState => {
         };
     }
 
-    case 'PLANTS_FIRE': {
-      const newProjectiles: Projectile[] = [];
-      let currentProjectileId = state.nextIds.projectile;
-      state.plants.forEach(plant => {
-        if (plant.type !== 'PEASHOOTER' && plant.type !== 'REPEATER') return;
-
-        const hasZombieInRow = state.zombies.some(z => z.row === plant.row && z.x > plant.col * CELL_SIZE);
-        if (hasZombieInRow) {
-          if (plant.type === 'PEASHOOTER') {
-              newProjectiles.push({
-                id: currentProjectileId++, row: plant.row, x: (plant.col + 0.7) * CELL_SIZE,
-              });
-          } else if (plant.type === 'REPEATER') {
-              newProjectiles.push({
-                id: currentProjectileId++, row: plant.row, x: (plant.col + 0.7) * CELL_SIZE,
-              });
-              newProjectiles.push({
-                id: currentProjectileId++, row: plant.row, x: (plant.col + 0.9) * CELL_SIZE, // Second pea
-              });
-          }
-        }
-      });
-      return {
-        ...state,
-        projectiles: [...state.projectiles, ...newProjectiles],
-        nextIds: { ...state.nextIds, projectile: currentProjectileId },
-      };
-    }
-    
     case 'TICK': {
-      // 0. Update TTL for effects
+      // 0. Apply Auras/Buffs
+      let plantsWithBuffs = state.plants.map(p => ({ ...p, isBuffed: false }));
+      const rosettes = plantsWithBuffs.filter(p => p.type === 'ROSETTE');
+      rosettes.forEach(rosette => {
+          const buffedRows = [rosette.row - 1, rosette.row, rosette.row + 1];
+          const buffedCols = [rosette.col - 1, rosette.col, rosette.col + 1];
+          plantsWithBuffs = plantsWithBuffs.map(plant => {
+              // Rosettes cannot buff other Rosettes.
+              if (plant.type !== 'ROSETTE' && buffedRows.includes(plant.row) && buffedCols.includes(plant.col)) {
+                  return { ...plant, isBuffed: true };
+              }
+              return plant;
+          });
+      });
+
+      // 1. Update TTL for effects
       const updatedExplosions = state.explosions
         .map(exp => ({ ...exp, ttl: exp.ttl - TICK_RATE }))
         .filter(exp => exp.ttl > 0);
@@ -576,7 +592,7 @@ const gameReducer = (state: GameState, action: GameAction): GameState => {
         .map(hs => ({ ...hs, ttl: hs.ttl - TICK_RATE }))
         .filter(hs => hs.ttl > 0);
 
-      // 1. Move Zombies & check for game over
+      // 2. Move Zombies & check for game over
       let isGameOver = false;
       const movedZombies = state.zombies.map(z => {
         const speed = zombieData[z.type].speed * (z.isSlowed ? 0.75 : 1);
@@ -585,50 +601,88 @@ const gameReducer = (state: GameState, action: GameAction): GameState => {
         return { ...z, x: newX };
       });
 
-      // 2. Move Projectiles
+      // 3. Move Projectiles
       const movedProjectiles = state.projectiles
         .map(p => ({ ...p, x: p.x + PEA_SPEED }))
         .filter(p => p.x < GRID_COLS * CELL_SIZE);
 
-      // 2.5 Move Magic Balls
+      // 4. Move Magic Balls
       const movedMagicBalls = state.magicBalls
         .map(mb => ({ ...mb, x: mb.x - MAGIC_BALL_SPEED }))
         .filter(mb => mb.x > -CELL_SIZE);
         
-      // 3. Arm Potato Mines & Tick Plant Timers
-      let currentPlants = state.plants.map(p => {
+      // 5. Tick Plant Timers & Handle Firing
+      const newProjectiles: Projectile[] = [];
+      let currentProjectileId = state.nextIds.projectile;
+
+      let currentPlants = plantsWithBuffs.map(p => {
         let updatedPlant = { ...p };
+        // Tick timers
         if (p.type === 'POTATOMINE' && p.armTime > 0) {
           updatedPlant.armTime = Math.max(0, p.armTime - TICK_RATE);
         }
+        if ((p.type === 'PEASHOOTER' || p.type === 'REPEATER') && p.attackCooldown > 0) {
+            updatedPlant.attackCooldown = Math.max(0, p.attackCooldown - TICK_RATE);
+        }
         if (p.type === 'CUCUMBER') {
-            if (p.attackCooldown > 0) {
-                updatedPlant.attackCooldown = Math.max(0, p.attackCooldown - TICK_RATE);
-            }
-            if (p.attackAnimationTimer > 0) {
-                updatedPlant.attackAnimationTimer = Math.max(0, p.attackAnimationTimer - TICK_RATE);
-            }
+            if (p.attackCooldown > 0) updatedPlant.attackCooldown = Math.max(0, p.attackCooldown - TICK_RATE);
+            if (p.attackAnimationTimer > 0) updatedPlant.attackAnimationTimer = Math.max(0, p.attackAnimationTimer - TICK_RATE);
             updatedPlant.isAttacking = updatedPlant.attackAnimationTimer > 0;
         }
         if (p.type === 'STRAWBERRY' && p.isSleeping && p.sleepTimer > 0) {
             updatedPlant.sleepTimer = Math.max(0, p.sleepTimer - TICK_RATE);
-            if (updatedPlant.sleepTimer <= 0) {
-                updatedPlant.isSleeping = false;
-            }
+            if (updatedPlant.sleepTimer <= 0) updatedPlant.isSleeping = false;
         }
         return updatedPlant;
       });
 
-      // 3.5 Tick Zombie Timers
+      currentPlants = currentPlants.map(plant => {
+          if ((plant.type === 'PEASHOOTER' || plant.type === 'REPEATER') && plant.attackCooldown <= 0) {
+              const hasZombieInRow = movedZombies.some(z => z.row === plant.row && z.x > plant.col * CELL_SIZE);
+              if (hasZombieInRow) {
+                  if (plant.type === 'PEASHOOTER') {
+                      newProjectiles.push({ id: currentProjectileId++, row: plant.row, x: (plant.col + 0.7) * CELL_SIZE });
+                  } else if (plant.type === 'REPEATER') {
+                      newProjectiles.push({ id: currentProjectileId++, row: plant.row, x: (plant.col + 0.7) * CELL_SIZE });
+                      newProjectiles.push({ id: currentProjectileId++, row: plant.row, x: (plant.col + 0.9) * CELL_SIZE });
+                  }
+                  const newCooldown = plant.isBuffed ? PLANT_FIRE_RATE / 1.5 : PLANT_FIRE_RATE;
+                  return { ...plant, attackCooldown: newCooldown };
+              }
+          }
+          return plant;
+      });
+
+      // 6. Tick Zombie Timers
       const zombiesWithTickedTimers = movedZombies.map(z => {
         if (z.type === 'MAGIC' && z.attackCooldown > 0) {
-            return { ...z, attackCooldown: Math.max(0, z.attackCooldown - TICK_RATE) };
+            z.attackCooldown = Math.max(0, z.attackCooldown - TICK_RATE);
+        }
+        if (z.type === 'BUS' && z.spawnCooldown > 0) {
+            z.spawnCooldown = Math.max(0, z.spawnCooldown - TICK_RATE);
         }
         return z;
       });
 
-      // 4. Melee Attacks (Cucumbers)
-      let zombiesAfterMelee = [...zombiesWithTickedTimers];
+      // 6.5. Bus Spawning
+      const newZombiesFromBuses: Zombie[] = [];
+      let nextZombieIdFromBus = state.nextIds.zombie;
+      let zombiesAfterBusSpawning = zombiesWithTickedTimers.map(zombie => {
+          if (zombie.type === 'BUS' && zombie.spawnCooldown <= 0) {
+              newZombiesFromBuses.push({
+                  id: nextZombieIdFromBus++,
+                  row: zombie.row,
+                  x: zombie.x + (CELL_SIZE * 0.5), // Spawn behind the bus
+                  health: zombieData['NORMAL'].health,
+                  type: 'NORMAL',
+              });
+              return { ...zombie, spawnCooldown: BUS_SPAWN_RATE };
+          }
+          return zombie;
+      });
+
+      // 7. Melee Attacks (Cucumbers)
+      let zombiesAfterMelee = [...zombiesAfterBusSpawning, ...newZombiesFromBuses];
       let plantsAfterMelee = [...currentPlants];
       const newHitSplats: HitSplat[] = [];
       let nextHitSplatId = state.nextIds.hitSplat;
@@ -658,7 +712,7 @@ const gameReducer = (state: GameState, action: GameAction): GameState => {
           }
       }
 
-      // 4.5. Magic Zombie Firing
+      // 8. Magic Zombie Firing
       const newMagicBalls: MagicBall[] = [];
       let nextMagicBallId = state.nextIds.magicBall;
       zombiesAfterMelee = zombiesAfterMelee.map(z => {
@@ -669,7 +723,7 @@ const gameReducer = (state: GameState, action: GameAction): GameState => {
           return z;
       });
 
-      // 4.75 Runner Plant (Eggplant) Movement & Collision
+      // 9. Runner Plant (Eggplant) Movement & Collision
       const movedRunnerPlants = state.runnerPlants
         .map(rp => ({ ...rp, x: rp.x + EGGPLANT_SPEED }))
         .filter(rp => rp.x < GRID_COLS * CELL_SIZE);
@@ -704,7 +758,7 @@ const gameReducer = (state: GameState, action: GameAction): GameState => {
       });
       const remainingRunnerPlants = movedRunnerPlants.filter(rp => !runnersToRemove.has(rp.id));
       
-      // 5. Weed Collision
+      // 10. Weed Collision
       let zombiesAfterWeed = [...zombiesAfterEggplantHits];
       const plantsAfterWeed = [...plantsAfterMelee]; // Pass plants through, unchanged for the next step.
 
@@ -726,7 +780,7 @@ const gameReducer = (state: GameState, action: GameAction): GameState => {
       // No need to filter plantsAfterWeed, as weeds are not removed.
 
 
-      // 5. Potato Mine Explosions
+      // 11. Potato Mine Explosions
       let zombiesAfterExplosions = [...zombiesAfterWeed];
       let plantsAfterExplosions = [...plantsAfterWeed];
       const plantsToRemove = new Set<number>();
@@ -759,7 +813,7 @@ const gameReducer = (state: GameState, action: GameAction): GameState => {
       zombiesAfterExplosions = zombiesAfterExplosions.filter(z => !zombiesToRemove.has(z.id));
       plantsAfterExplosions = plantsAfterExplosions.filter(p => !plantsToRemove.has(p.id));
 
-      // 5.5 Strawberry Explosions
+      // 12. Strawberry Explosions
       for (let i = 0; i < plantsAfterExplosions.length; i++) {
         const plant = plantsAfterExplosions[i];
         if (plant.type === 'STRAWBERRY' && !plant.isSleeping) {
@@ -798,7 +852,7 @@ const gameReducer = (state: GameState, action: GameAction): GameState => {
         }
       }
 
-      // 6. Projectile Collision Detection
+      // 13. Projectile Collision Detection
       let zombiesAfterHit = [...zombiesAfterExplosions];
       const projectilesToRemove = new Set<number>();
 
@@ -819,7 +873,7 @@ const gameReducer = (state: GameState, action: GameAction): GameState => {
       
       const remainingProjectiles = movedProjectiles.filter(p => !projectilesToRemove.has(p.id));
       
-      // 6.5 Magic Ball Collision
+      // 14. Magic Ball Collision
       const plantsToRemoveFromMagicHits = new Set<number>();
       const magicBallsToRemove = new Set<number>();
       let finalPlants = [...plantsAfterExplosions];
@@ -842,7 +896,7 @@ const gameReducer = (state: GameState, action: GameAction): GameState => {
 
       const remainingZombies = zombiesAfterHit.filter(z => z.health > 0);
       
-      // 7. Move Falling Suns
+      // 15. Move Falling Suns
       const movedSuns = state.sunsToCollect.map(sun => {
         if (sun.isFalling && sun.y < sun.targetY) {
             return {...sun, y: sun.y + SUN_FALL_SPEED };
@@ -850,7 +904,7 @@ const gameReducer = (state: GameState, action: GameAction): GameState => {
         return sun;
       });
 
-      // 8. Update Cooldowns
+      // 16. Update Cooldowns
       const newCooldowns = { ...state.cooldowns };
       for (const plantType in newCooldowns) {
           if (newCooldowns[plantType as PlantType] > 0) {
@@ -858,7 +912,7 @@ const gameReducer = (state: GameState, action: GameAction): GameState => {
           }
       }
 
-      // 9. Check for Wave Completion
+      // 17. Check for Wave Completion
       const waveIsActive = state.totalZombiesInWave > 0;
       const allZombiesSpawned = state.zombieSpawnList.length === 0;
       const allZombiesCleared = remainingZombies.length === 0;
@@ -874,12 +928,13 @@ const gameReducer = (state: GameState, action: GameAction): GameState => {
                   plants: finalPlants,
                   runnerPlants: remainingRunnerPlants,
                   zombies: remainingZombies,
-                  projectiles: remainingProjectiles,
+                  projectiles: [...remainingProjectiles, ...newProjectiles],
                   magicBalls: [...remainingMagicBalls, ...newMagicBalls],
                   sunsToCollect: movedSuns,
                   explosions: [...updatedExplosions, ...newExplosionsThisTick],
                   hitSplats: [...updatedHitSplats, ...newHitSplats],
                   cooldowns: newCooldowns,
+                  nextIds: { ...state.nextIds, projectile: currentProjectileId, explosion: nextExplosionId, hitSplat: nextHitSplatId, magicBall: nextMagicBallId, zombie: nextZombieIdFromBus },
                   currentWave: nextWave,
                   waveAnnouncement: `Get ready for Wave ${nextWave + 1}!`,
                   totalZombiesInWave: 0, // Mark wave as inactive until started
@@ -887,7 +942,7 @@ const gameReducer = (state: GameState, action: GameAction): GameState => {
           }
       }
       
-      // 10. Handle Preparation Time
+      // 18. Handle Preparation Time
       let newPreparationTimeLeft = state.preparationTimeLeft;
       let newWaveAnnouncement = state.waveAnnouncement;
       
@@ -903,14 +958,14 @@ const gameReducer = (state: GameState, action: GameAction): GameState => {
         plants: finalPlants,
         runnerPlants: remainingRunnerPlants,
         zombies: remainingZombies,
-        projectiles: remainingProjectiles,
+        projectiles: [...remainingProjectiles, ...newProjectiles],
         magicBalls: [...remainingMagicBalls, ...newMagicBalls],
         sunsToCollect: movedSuns,
         explosions: [...updatedExplosions, ...newExplosionsThisTick],
         hitSplats: [...updatedHitSplats, ...newHitSplats],
         cooldowns: newCooldowns,
         gameStatus: isGameOver ? 'GAME_OVER' : state.gameStatus,
-        nextIds: { ...state.nextIds, explosion: nextExplosionId, hitSplat: nextHitSplatId, magicBall: nextMagicBallId },
+        nextIds: { ...state.nextIds, projectile: currentProjectileId, explosion: nextExplosionId, hitSplat: nextHitSplatId, magicBall: nextMagicBallId, zombie: nextZombieIdFromBus },
         preparationTimeLeft: newPreparationTimeLeft,
         waveAnnouncement: newWaveAnnouncement,
       };
@@ -941,6 +996,7 @@ const ChallengeMenu = ({ onSelectChallenge, onBack }: {
         { type: 'NO_SUNFLOWER', waves: 25 },
         { type: 'BOOM', waves: 25 },
         { type: 'BRUTAL', waves: 10 },
+        { type: 'BUS', waves: 25 },
     ];
 
     return (
@@ -963,6 +1019,10 @@ const ChallengeMenu = ({ onSelectChallenge, onBack }: {
                         case 'BRUTAL':
                             title = 'Brutal';
                             description = `Survive ${challenge.waves} incredibly difficult waves. Not for the faint of heart.`;
+                            break;
+                        case 'BUS':
+                            title = 'Bus Route';
+                            description = `Survive ${challenge.waves} waves against relentless Bus zombies that spawn more zombies.`;
                             break;
                     }
 
@@ -1015,6 +1075,7 @@ const getPlantEmoji = (plantType: PlantType) => {
         case 'EGGPLANT': return '🍆';
         case 'STRAWBERRY': return '🍓';
         case 'WEED': return '🌱';
+        case 'ROSETTE': return '🌹';
         default: return '';
     }
 };
@@ -1054,7 +1115,7 @@ const PlantCard = ({ plantType, onSelect, suns, selectedPlant, cooldown, totalCo
 };
 
 const PlantSelectionScreen = ({ onConfirm, challenge }: { onConfirm: (plants: PlantType[]) => void; challenge: Challenge; }) => {
-    const allPlants: PlantType[] = ['SUNFLOWER', 'PEASHOOTER', 'REPEATER', 'POTATOMINE', 'CHERRYBOMB', 'CUCUMBER', 'EGGPLANT', 'STRAWBERRY', 'WEED'];
+    const allPlants: PlantType[] = ['SUNFLOWER', 'PEASHOOTER', 'REPEATER', 'POTATOMINE', 'CHERRYBOMB', 'CUCUMBER', 'EGGPLANT', 'STRAWBERRY', 'WEED', 'ROSETTE'];
     
     let availablePlants: PlantType[];
     switch (challenge?.type) {
@@ -1162,13 +1223,11 @@ const App = () => {
     if (gameStatus !== 'PLAYING') return;
 
     const tickTimer = setInterval(() => dispatch({ type: 'TICK' }), TICK_RATE);
-    const fireTimer = setInterval(() => dispatch({ type: 'PLANTS_FIRE' }), PLANT_FIRE_RATE);
     const sunTimer = setInterval(() => dispatch({ type: 'SPAWN_NATURAL_SUN' }), NATURAL_SUN_SPAWN_RATE);
     const sunflowerTimer = setInterval(() => dispatch({ type: 'SUNFLOWERS_PRODUCE_SUN'}), SUNFLOWER_PRODUCE_RATE);
 
     return () => {
       clearInterval(tickTimer);
-      clearInterval(fireTimer);
       clearInterval(sunTimer);
       clearInterval(sunflowerTimer);
     };
@@ -1233,6 +1292,9 @@ const App = () => {
     }
     if (plant.type === 'STRAWBERRY' && plant.isSleeping) {
         classes += ' sleeping';
+    }
+    if (plant.isBuffed) {
+        classes += ' buffed';
     }
     return classes;
   };
@@ -1341,6 +1403,9 @@ const App = () => {
                     } else if (zombie.type === 'MAGIC') {
                         zombieClass += ' magic';
                         zombieEmoji = '🧙';
+                    } else if (zombie.type === 'BUS') {
+                        zombieClass += ' bus';
+                        zombieEmoji = '🚌';
                     }
                     return (
                         <div key={zombie.id} className={zombieClass} style={{ top: zombie.row * CELL_SIZE, left: zombie.x }}>
