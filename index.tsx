@@ -188,12 +188,12 @@ const generateBrutalWaves = (count: number) => {
     const waves = [];
     for (let i = 0; i < count; i++) {
         const waveNum = i + 1;
-        const normal = 10 + Math.floor(Math.pow(waveNum, 1.8));
-        const fast = 3 + Math.floor(Math.pow(waveNum, 1.6));
-        const armor = waveNum >= 2 ? 2 + Math.floor(Math.pow(waveNum - 1, 1.5)) : 0;
-        const magic = waveNum >= 4 ? 2 + Math.floor(Math.pow(waveNum - 3, 1.4)) : 0;
+        const normal = (10 + Math.floor(Math.pow(waveNum, 1.8))) * 2;
+        const fast = (3 + Math.floor(Math.pow(waveNum, 1.6))) * 2;
+        const armor = waveNum >= 2 ? (2 + Math.floor(Math.pow(waveNum - 1, 1.5))) * 2 : 0;
+        const magic = waveNum >= 4 ? (2 + Math.floor(Math.pow(waveNum - 3, 1.4))) * 2 : 0;
         
-        const spawnRate = Math.max(300, 3000 - (i * 250));
+        const spawnRate = Math.max(250, 2500 - (i * 250));
 
         waves.push({
             normal,
@@ -283,7 +283,7 @@ const gameReducer = (state: GameState, action: GameAction): GameState => {
     }
     case 'CONFIRM_PLANT_SELECTION': {
       const isBrutal = state.challenge?.type === 'BRUTAL';
-      const prepTime = isBrutal ? 180000 : PREPARATION_TIME; // 3 minutes for Brutal
+      const prepTime = isBrutal ? 90000 : PREPARATION_TIME; // 90 seconds for Brutal
 
       return {
         ...state,
@@ -449,11 +449,11 @@ const gameReducer = (state: GameState, action: GameAction): GameState => {
   
         const isBrutal = state.challenge?.type === 'BRUTAL';
         
-        // In Brutal mode, spawn 3-4 zombies.
+        // In Brutal mode, spawn 4-5 zombies.
         // Otherwise, after wave 6 (index 5), spawn 2-3 zombies.
         // For wave 6 (index 5), spawn two. Before that, spawn one.
         const zombiesToSpawnCount = isBrutal
-          ? (Math.random() < 0.5 ? 4 : 3)
+          ? (Math.random() < 0.5 ? 5 : 4)
           : state.currentWave > 5
           ? (Math.random() < 0.35 ? 3 : 2)
           : state.currentWave >= 5 ? 2 : 1;
@@ -1195,6 +1195,25 @@ const App = () => {
     }
   }, [gameStatus, state.waveAnnouncement, state.zombieSpawnList, state.zombieSpawnRate]);
 
+  // Keyboard controls for pausing
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+        if (event.code === 'Space') {
+            event.preventDefault(); // Prevent scrolling page
+            if (state.gameStatus === 'PLAYING') {
+                dispatch({ type: 'PAUSE_GAME' });
+            } else if (state.gameStatus === 'PAUSED') {
+                dispatch({ type: 'RESUME_GAME' });
+            }
+        }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+        window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [state.gameStatus]);
 
   const handleCellClick = useCallback((row: number, col: number) => {
       if (selectedPlant) {
