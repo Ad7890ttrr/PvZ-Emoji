@@ -19,6 +19,7 @@ const REPEATER_COST = 250;
 const CUCUMBER_COST = 75;
 const EGGPLANT_COST = 100;
 const STRAWBERRY_COST = 75;
+const WEED_COST = 25;
 const SUN_VALUE = 25;
 const MAX_SUNS = 500;
 const NORMAL_ZOMBIE_HEALTH = 3;
@@ -49,6 +50,7 @@ const REPEATER_COOLDOWN = 15000;
 const CUCUMBER_COOLDOWN = 20000;
 const EGGPLANT_COOLDOWN = 17500;
 const STRAWBERRY_COOLDOWN = 30000;
+const WEED_COOLDOWN = 10000;
 
 // Physics & Hitboxes
 const NORMAL_ZOMBIE_SPEED = 0.5; // Pixels per tick
@@ -63,7 +65,7 @@ const ZOMBIE_HIT_WIDTH = 40;
 const PEA_HIT_WIDTH = 10;
 
 // --- TYPES ---
-type PlantType = 'PEASHOOTER' | 'SUNFLOWER' | 'POTATOMINE' | 'CHERRYBOMB' | 'REPEATER' | 'CUCUMBER' | 'EGGPLANT' | 'STRAWBERRY';
+type PlantType = 'PEASHOOTER' | 'SUNFLOWER' | 'POTATOMINE' | 'CHERRYBOMB' | 'REPEATER' | 'CUCUMBER' | 'EGGPLANT' | 'STRAWBERRY' | 'WEED';
 type ZombieType = 'NORMAL' | 'FAST' | 'ARMOR' | 'MAGIC';
 interface Plant {
   id: number;
@@ -78,7 +80,7 @@ interface Plant {
   sleepTimer?: number;
 }
 interface RunnerPlant { id: number; row: number; x: number; type: 'EGGPLANT'; }
-interface Zombie { id: number; row: number; x: number; health: number; type: ZombieType; attackCooldown?: number; }
+interface Zombie { id: number; row: number; x: number; health: number; type: ZombieType; attackCooldown?: number; isSlowed?: boolean; }
 interface Projectile { id: number; row: number; x: number; }
 interface MagicBall { id: number; row: number; x: number; }
 interface Sun { id: number; x: number; y: number; isFalling: boolean; targetY: number; }
@@ -142,6 +144,7 @@ const plantData: { [key in PlantType]: { cost: number; cooldown: number } } = {
   CUCUMBER: { cost: CUCUMBER_COST, cooldown: CUCUMBER_COOLDOWN },
   EGGPLANT: { cost: EGGPLANT_COST, cooldown: EGGPLANT_COOLDOWN },
   STRAWBERRY: { cost: STRAWBERRY_COST, cooldown: STRAWBERRY_COOLDOWN },
+  WEED: { cost: WEED_COST, cooldown: WEED_COOLDOWN },
 };
 
 // --- ZOMBIE DATA ---
@@ -225,6 +228,7 @@ const initialState: GameState = {
     CUCUMBER: 0,
     EGGPLANT: 0,
     STRAWBERRY: 0,
+    WEED: 0,
   },
   nextIds: { plant: 0, zombie: 0, projectile: 0, sun: 0, explosion: 0, hitSplat: 0, magicBall: 0, runnerPlant: 0 },
   preparationTimeLeft: 0,
@@ -575,7 +579,7 @@ const gameReducer = (state: GameState, action: GameAction): GameState => {
       // 1. Move Zombies & check for game over
       let isGameOver = false;
       const movedZombies = state.zombies.map(z => {
-        const speed = zombieData[z.type].speed;
+        const speed = zombieData[z.type].speed * (z.isSlowed ? 0.75 : 1);
         const newX = z.x - speed;
         if (newX < -CELL_SIZE) isGameOver = true;
         return { ...z, x: newX };
@@ -699,11 +703,32 @@ const gameReducer = (state: GameState, action: GameAction): GameState => {
         }
       });
       const remainingRunnerPlants = movedRunnerPlants.filter(rp => !runnersToRemove.has(rp.id));
+      
+      // 5. Weed Collision
+      let zombiesAfterWeed = [...zombiesAfterEggplantHits];
+      const plantsAfterWeed = [...plantsAfterMelee]; // Pass plants through, unchanged for the next step.
+
+      zombiesAfterWeed = zombiesAfterWeed.map(zombie => {
+          if (zombie.isSlowed) return zombie;
+
+          const zombieCellCol = Math.floor((zombie.x + ZOMBIE_HIT_WIDTH / 2) / CELL_SIZE);
+          const hasWeedOnTile = plantsAfterWeed.some(plant => 
+              plant.type === 'WEED' &&
+              plant.row === zombie.row && 
+              plant.col === zombieCellCol
+          );
+
+          if (hasWeedOnTile) {
+              return { ...zombie, isSlowed: true };
+          }
+          return zombie;
+      });
+      // No need to filter plantsAfterWeed, as weeds are not removed.
 
 
       // 5. Potato Mine Explosions
-      let zombiesAfterExplosions = [...zombiesAfterEggplantHits];
-      let plantsAfterExplosions = [...plantsAfterMelee];
+      let zombiesAfterExplosions = [...zombiesAfterWeed];
+      let plantsAfterExplosions = [...plantsAfterWeed];
       const plantsToRemove = new Set<number>();
       const zombiesToRemove = new Set<number>();
       const newExplosionsThisTick: Explosion[] = [];
@@ -981,7 +1006,7 @@ const PausedScreen = ({ onResume, onRestart }: { onResume: () => void; onRestart
 
 const getPlantEmoji = (plantType: PlantType) => {
     switch(plantType) {
-        case 'PEASHOOTER': return '🌱';
+        case 'PEASHOOTER': return '🫛';
         case 'SUNFLOWER': return '🌻';
         case 'POTATOMINE': return '🥔';
         case 'CHERRYBOMB': return '🍒';
@@ -989,6 +1014,7 @@ const getPlantEmoji = (plantType: PlantType) => {
         case 'CUCUMBER': return '🥒';
         case 'EGGPLANT': return '🍆';
         case 'STRAWBERRY': return '🍓';
+        case 'WEED': return '🌱';
         default: return '';
     }
 };
@@ -1028,7 +1054,7 @@ const PlantCard = ({ plantType, onSelect, suns, selectedPlant, cooldown, totalCo
 };
 
 const PlantSelectionScreen = ({ onConfirm, challenge }: { onConfirm: (plants: PlantType[]) => void; challenge: Challenge; }) => {
-    const allPlants: PlantType[] = ['SUNFLOWER', 'PEASHOOTER', 'REPEATER', 'POTATOMINE', 'CHERRYBOMB', 'CUCUMBER', 'EGGPLANT', 'STRAWBERRY'];
+    const allPlants: PlantType[] = ['SUNFLOWER', 'PEASHOOTER', 'REPEATER', 'POTATOMINE', 'CHERRYBOMB', 'CUCUMBER', 'EGGPLANT', 'STRAWBERRY', 'WEED'];
     
     let availablePlants: PlantType[];
     switch (challenge?.type) {
@@ -1285,6 +1311,7 @@ const App = () => {
                 ))}
                 {zombies.map(zombie => {
                     let zombieClass = 'zombie';
+                    if (zombie.isSlowed) zombieClass += ' slowed';
                     let zombieEmoji = '🧟';
                     if (zombie.type === 'FAST') {
                         zombieClass += ' fast';

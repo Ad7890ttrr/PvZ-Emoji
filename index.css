@@ -1,3 +1,4 @@
+
 /* Basic Reset & Theming */
 :root {
   --lawn-green-dark: #3a8f48;
@@ -338,6 +339,11 @@ body {
   height: var(--cell-size);
   font-size: 60px;
   pointer-events: none;
+  transition: filter 0.3s ease;
+}
+
+.zombie.slowed {
+  filter: hue-rotate(180deg) brightness(1.1);
 }
 
 .zombie.fast {
